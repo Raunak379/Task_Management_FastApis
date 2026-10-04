@@ -3,6 +3,7 @@
 ## 1. FastAPI — the web framework
 
 FastAPI turns Python functions into HTTP endpoints using decorators:
+Decorators:- A decorator is a function that adds extra functionality to another function without changing its original code.
 
 ```python
 @task_routes.get("/all_task")
