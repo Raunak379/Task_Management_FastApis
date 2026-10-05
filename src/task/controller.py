@@ -59,4 +59,5 @@ def delete_task(task_id:int,db:session):
     db.delete(one_task)
     db.commit()
 
-    return {"status":"task deleted successfully"}
+    #return {"status":"task deleted successfully"}
+    return None
