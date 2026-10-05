@@ -33,7 +33,7 @@ An `APIRouter` is a mini sub-application. You define routes on it, then
 (done in `main.py`). The `prefix` is prepended to every route inside it, so
 you don't repeat `/task` on every single endpoint.
 
-## 3. Dependency Injection — `Depends(get_db)`
+## 3. Dependency Injection — `Depends(get_db)`:- Instead of a function creating everything it needs by itself, we provide (inject) those required things from outside.,,Chef → Market → Buy ingredients → Cook,,,,,Supplier → Ingredients → Chef → Cook
 
 ```python
 def create_task(body: TaskSchema, db = Depends(get_db)):
@@ -42,6 +42,8 @@ def create_task(body: TaskSchema, db = Depends(get_db)):
 `Depends(get_db)` tells FastAPI: "before running this function, call `get_db()`
 and pass its result in as `db`." This is how every route gets a fresh database
 session without manually opening/closing one in every function.
+
+session:- Think of session as a connection/working interface that allows your Python code to communicate with the database.
 
 `get_db` (in `src/utils/db.py`) is a **generator function** using `yield`:
 
