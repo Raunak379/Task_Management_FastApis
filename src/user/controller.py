@@ -1,5 +1,5 @@
 #controller.py is used to organize the logic that handles API requests. It becomes useful when your FastAPI project gets bigger.
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Request
 from src.user.dtos import userSchema, LoginSchema
 from sqlalchemy.orm import Session
 from src.user.models import user
@@ -7,6 +7,7 @@ from pwdlib import PasswordHash
 from src.utils.settings import settings
 from datetime import datetime, timedelta
 import jwt
+from jwt.exceptions import InvalidTokenError
 
 password_hash = PasswordHash.recommended()
 def get_password_hash(password):
@@ -59,5 +60,29 @@ def login_user(body, db:Session):
     ##genrate token for user throug jwt
     exp_time = datetime.now()+timedelta(minutes=settings.EXP_TIME)
     print(exp_time)
-    token = jwt.encode({"username":is_user.username, "exp":exp_time}, settings.SECRET_KEY, settings.ALGORITHM)
+    token = jwt.encode({"username":is_user.username, "exp":exp_time.timestamp()}, settings.SECRET_KEY, settings.ALGORITHM)
     return {"token":token}
+
+
+
+######  BASE ON TOKEN HOW TO AUTHENTICATE ----- IF USER CALL APIS THAT MEAN SEND THE TOKEN ---- IN HEADER
+def is_authenticated(request:Request, db:Session):
+    try:
+       token = request.headers.get("authorization")
+       if not token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail = "you are unauthorized") 
+       token = token.split(" ")[-1]
+       data = jwt.decode(token,settings.SECRET_KEY, settings.ALGORITHM)
+       user_name = data.get("username")
+       #exp_time = data.get("exp")
+
+       #current_time = datetime.now().timestamp()
+       #print(exp_time - current_time)
+       #if current_time > exp_time:
+       #    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail = "you are unauthorized")
+       is_user = db.query(user).filter(user.username == user_name).first()
+       if not is_user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail = "you are unauthorized")
+       return is_user
+    except InvalidTokenError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail = "you are unauthorized")
