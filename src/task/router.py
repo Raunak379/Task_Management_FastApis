@@ -11,12 +11,12 @@ task_routes = APIRouter(prefix= "/task")    #prefix =  https://127.0.0.1:8000/pr
 #post method
 @task_routes.post("/create", status_code=status.HTTP_201_CREATED)
 def create_task(body:TaskSchema, db = Depends(get_db), is_user:user = Depends(is_authenticated)):
-    return controller.create_task(body, db)
+    return controller.create_task(body, db, is_user)
 
 #get method
 @task_routes.get("/all_task", status_code=status.HTTP_200_OK)
 def get_all_task(db = Depends(get_db), is_user:user = Depends(is_authenticated)):
-    return controller.get_task(db)
+    return controller.get_task(db, is_user)
 
 #get specific data with the help of id, number etc
 @task_routes.get("/one_task/{task_id}", status_code=status.HTTP_200_OK)
@@ -26,9 +26,9 @@ def get_one_task(task_id:int, db = Depends(get_db), is_user:user = Depends(is_au
 #update the task
 @task_routes.put("/update_task/{task_id}", status_code=status.HTTP_201_CREATED)
 def update_task(body:TaskSchema,task_id:int,db = Depends(get_db), is_user:user = Depends(is_authenticated)):
-    return controller.update_task(body, task_id, db)
+    return controller.update_task(body, task_id, db, is_user)
 
 #delete task
 @task_routes.delete("/delete_task/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(task_id:int,db = Depends(get_db), is_user:user = Depends(is_authenticated)):
-    return controller.delete_task(task_id, db)
+    return controller.delete_task(task_id, db, is_user)
