@@ -34,17 +34,37 @@ You'll know it's active because your shell prompt shows `(env)` at the start.
 pip install -r requirement.txt
 ```
 
-This reads every package listed in `requirement.txt` and installs it into
-the `env/` virtual environment (not your system Python).
+⚠️ **`requirement.txt` is currently incomplete.** The code imports `jwt`
+(PyJWT) and `pwdlib` for authentication, but neither is listed in the file.
+Until that's fixed (see `05_issues_and_fixes.md`), also run:
+
+```bash
+pip install PyJWT "pwdlib[argon2]"
+```
+
+(Both are already present in this repo's `env/` folder if you're reusing it
+instead of creating a fresh one.)
 
 ## 4. Configure `.env`
 
-Already present at the project root:
+Already present at the project root, with four required keys:
 ```
 DB_CONNECTION = "mysql+pymysql://root:<password>@localhost/task_management"
+SECRET_KEY = "<any random string>"
+ALGORITHM = "HS256"
+EXP_TIME = 30
 ```
-Update the username/password/host/database name to match your own MySQL setup.
-`src/utils/settings.py` reads this automatically on startup — no code changes needed.
+- Update `DB_CONNECTION`'s username/password/host/database name to match your
+  own MySQL setup.
+- `SECRET_KEY` signs login tokens — use a long random value, never commit a
+  real one to a public repo.
+- `ALGORITHM` must be a JWT algorithm PyJWT supports (`HS256` is the common
+  default for a single shared secret).
+- `EXP_TIME` is the login token lifetime in minutes.
+
+`src/utils/settings.py` reads all four automatically on startup — no code
+changes needed. If any is missing, startup fails fast with a clear
+validation error instead of a confusing runtime crash later.
 
 ## 5. Run the server
 
@@ -70,41 +90,74 @@ FastAPI auto-generates interactive docs — open in a browser:
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
 
-Both let you fill in a form and send real requests without needing curl or Postman.
+Swagger's "Authorize" button lets you paste a bearer token once and have it
+auto-attached to every protected request — useful once you have a token from
+step 2 below.
 
 ### Example requests with `curl`
 
-Create a task:
+**Every `/task/*` endpoint requires a JWT.** Register and log in first.
+
+**1. Register a user:**
+```bash
+curl -X POST http://127.0.0.1:8000/user/register \
+  -H "Content-Type: application/json" \
+  -d '{"username": "angad", "email": "angad14723@gmail.com", "password": "a-real-password"}'
+```
+Returns `{"username": ..., "email": ..., "id": ...}` — no password/hash in the response.
+
+**2. Log in to get a token:**
+```bash
+curl -X POST http://127.0.0.1:8000/user/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "angad", "password": "a-real-password"}'
+```
+Returns `{"token": "<jwt>"}`. Save that token — it expires after `EXP_TIME` minutes.
+
+**3. Check the token works:**
+```bash
+curl http://127.0.0.1:8000/user/is_auth \
+  -H "Authorization: Bearer <jwt>"
+```
+
+**4. Create a task (now using the token):**
 ```bash
 curl -X POST http://127.0.0.1:8000/task/create \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <jwt>" \
   -d '{"title": "Buy milk", "description": "2% milk", "is_completed": false}'
 ```
 
-Get all tasks:
+**5. Get all tasks:**
 ```bash
-curl http://127.0.0.1:8000/task/all_task
+curl http://127.0.0.1:8000/task/all_task \
+  -H "Authorization: Bearer <jwt>"
 ```
 
-Get one task:
+**6. Get one task:**
 ```bash
-curl http://127.0.0.1:8000/task/one_task/1
+curl http://127.0.0.1:8000/task/one_task/1 \
+  -H "Authorization: Bearer <jwt>"
 ```
 
-Update a task (remember: **all three fields are currently required** —
+**7. Update a task** (remember: **all three fields are currently required** —
 see `05_issues_and_fixes.md`):
 ```bash
 curl -X PUT http://127.0.0.1:8000/task/update_task/1 \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <jwt>" \
   -d '{"title": "Buy milk", "description": "whole milk this time", "is_completed": true}'
 ```
 
-Create a user:
+**8. Delete a task:**
 ```bash
-curl -X POST http://127.0.0.1:8000/user/create \
-  -H "Content-Type: application/json" \
-  -d '{"username": "angad", "email": "angad14723@gmail.com", "hashed_password": "temporary"}'
+curl -X DELETE http://127.0.0.1:8000/task/delete_task/1 \
+  -H "Authorization: Bearer <jwt>"
 ```
+Returns `204 No Content` on success.
+
+Omitting the `Authorization` header (or sending an expired/invalid token) on
+any `/task/*` call or `/user/is_auth` returns `401 Unauthorized`.
 
 ## 7. How the pieces connect, end to end
 
@@ -114,6 +167,9 @@ MySQL  <-- pymysql driver <-- SQLAlchemy engine (src/utils/db.py)
                               LocalSession (per-request DB session)
                                       |
                         get_db() dependency (Depends)
+                                      |
+                is_authenticated dependency (src/utils/helpers.py)
+                    (decodes JWT, loads the user row — task routes only)
                                       |
                        controller.py  <->  models.py (Task / user classes)
                                       |
@@ -126,5 +182,6 @@ MySQL  <-- pymysql driver <-- SQLAlchemy engine (src/utils/db.py)
                               your HTTP client (curl / browser / Postman)
 ```
 
-`settings.py` feeds the DB connection string (from `.env`) into `db.py` at
-import time — that's the one place config and the database layer connect.
+`settings.py` feeds the DB connection string and JWT config (from `.env`)
+into `db.py` and `helpers.py`/`user/controller.py` at import time — that's
+the one place config, the database layer, and the auth layer all connect.

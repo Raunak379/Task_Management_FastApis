@@ -139,7 +139,74 @@ to the class's typed fields (`DB_CONNECTION`), and validates them — so if
 `.env` is missing the variable, you get a clear startup error instead of a
 confusing runtime crash later.
 
-## 7. Virtual environment (`env/`) and `requirement.txt`
+## 7. JWT authentication — register, login, protect
+
+Three settings in `.env` drive this: `SECRET_KEY`, `ALGORITHM`, `EXP_TIME`.
+
+**Register** (`POST /user/register`): `src/user/controller.py::register` checks
+`username`/`email` aren't already taken, hashes the plaintext `password` with
+`pwdlib`'s `PasswordHash.recommended()`, and stores the hash as
+`hashed_password`. The response uses `userResponseSchema` so the hash is never
+returned to the client.
+
+**Login** (`POST /user/login`): `login_user` looks the user up by username,
+verifies the password against the stored hash, then builds a JWT:
+
+```python
+token = jwt.encode(
+    {"username": is_user.username, "exp": exp_time.timestamp()},
+    settings.SECRET_KEY,
+    settings.ALGORITHM,
+)
+```
+
+`exp` is the token's expiry (`now + EXP_TIME minutes`). The client is expected
+to store this token and send it back on every subsequent request.
+
+**Protecting routes** (`Depends(is_authenticated)`): every task endpoint in
+`src/task/router.py`, plus `GET /user/is_auth`, depends on
+`is_authenticated` (`src/utils/helpers.py`):
+
+```python
+def is_authenticated(request: Request, db: Session = Depends(get_db)):
+    token = request.headers.get("authorization")   # "Bearer <token>"
+    token = token.split(" ")[-1]
+    data = jwt.decode(token, settings.SECRET_KEY, settings.ALGORITHM)
+    user_name = data.get("username")
+    is_user = db.query(user).filter(user.username == user_name).first()
+    ...
+    return is_user   # injected into the route as `is_user`
+```
+
+So the client must send `Authorization: Bearer <token>` on every protected
+call. If the header is missing, the token is malformed/invalid, or the
+decoded username no longer matches a real user, this raises `401
+Unauthorized` before the route body ever runs — the same DI pattern as
+`Depends(get_db)` (§3), just returning a `user` row instead of a session.
+
+Note: `src/user/controller.py` has a **second, near-identical** copy of this
+same function (also called `is_authenticated`) that nothing currently calls —
+see `05_issues_and_fixes.md`.
+
+## 8. The `DELETE` endpoint
+
+```python
+@task_routes.delete("/delete_task/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_task(task_id:int, db = Depends(get_db), is_user:user = Depends(is_authenticated)):
+    return controller.delete_task(task_id, db)
+```
+
+`controller.delete_task` fetches the row by id (404 if missing), `db.delete(one_task)`,
+`db.commit()`s, and returns `None`. `204 No Content` means a successful response has
+no body — FastAPI enforces this, so returning `None` is correct here (returning a
+dict with a `204` status would actually raise an error).
+
+Note: `src/task/dtos.py` also defines a `TaskResponseSchema`, but no route currently
+declares it as a `response_model` — every task route still returns the raw
+SQLAlchemy `Task` object (or a dict wrapping it) and lets FastAPI's default
+encoder serialize it.
+
+## 9. Virtual environment (`env/`) and `requirement.txt`
 
 - `env/` is an isolated Python installation just for this project, created
   with `python -m venv env`. It keeps this project's package versions
@@ -151,19 +218,23 @@ confusing runtime crash later.
   ```
   (Note: the conventional filename is `requirements.txt`, plural — see 05.)
 
-## 8. How a single request flows end-to-end
+## 10. How a single request flows end-to-end
 
 Example: `POST /task/create` with body `{"title": "Buy milk", "description": "2%"}`
+and header `Authorization: Bearer <token-from-login>`.
 
 1. Uvicorn receives the raw HTTP request, hands it to the FastAPI `app`.
 2. FastAPI matches the path `/task/create` + method `POST` to
    `create_task()` in `src/task/router.py`.
 3. FastAPI resolves `Depends(get_db)` → opens a new DB session.
-4. FastAPI validates the JSON body against `TaskSchema` → builds a `body` object.
-5. `router.py` calls `controller.create_task(body, db)`.
-6. The controller converts `body` to a dict, builds a `Task(...)` SQLAlchemy
+4. FastAPI resolves `Depends(is_authenticated)` (§7) → reads the `Authorization`
+   header, decodes the JWT, looks up the matching user row. If this fails,
+   a `401` is returned here and steps 5+ never run.
+5. FastAPI validates the JSON body against `TaskSchema` → builds a `body` object.
+6. `router.py` calls `controller.create_task(body, db)`.
+7. The controller converts `body` to a dict, builds a `Task(...)` SQLAlchemy
    instance, `db.add()`s and `db.commit()`s it — this issues the actual
    `INSERT INTO task (...)` SQL to MySQL.
-7. The controller returns a dict `{"status": ..., "data": new_task}`.
-8. FastAPI serializes that return value to JSON and sends the HTTP response.
-9. After the response is sent, the `get_db` generator resumes and closes the session.
+8. The controller returns a dict `{"status": ..., "data": new_task}`.
+9. FastAPI serializes that return value to JSON and sends the HTTP response.
+10. After the response is sent, the `get_db` generator resumes and closes the session.
