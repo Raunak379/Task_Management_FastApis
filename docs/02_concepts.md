@@ -218,7 +218,38 @@ encoder serialize it.
   ```
   (Note: the conventional filename is `requirements.txt`, plural — see 05.)
 
-## 10. How a single request flows end-to-end
+## 11. `BackgroundTasks` — sending the confirmation email without delaying the response
+
+```python
+async def register(body: userSchema, db: Session, bg_task: BackgroundTasks):
+    ...
+    db.commit()
+    bg_task.add_task(send_email, [new_user.email])
+    return new_user
+```
+
+`BackgroundTasks` is another FastAPI-injected parameter (declared directly in
+the function signature, no `Depends()` needed). Calling `bg_task.add_task(fn,
+*args)` doesn't run `fn` immediately — FastAPI queues it and runs it **after**
+the HTTP response has already been sent to the client. This is why
+registration returns instantly even though sending an email over SMTP
+(`src/utils/mail.py::send_email`, built on `fastapi-mail`/`aiosmtplib`) can
+take a second or more — the client never waits on it.
+
+Because `register` now calls an `async def` function (`send_email`) and takes
+`BackgroundTasks`, both `register` itself and the router function that calls
+it (`src/user/router.py::register`) are declared `async def` and `await`
+each other.
+
+⚠️ **Bug:** `send_email`'s signature is `async def send_email(email: str)`,
+and it does `recipients=[email]` internally (it wraps the single address in a
+list itself). But `register` calls `bg_task.add_task(send_email,
+[new_user.email])` — passing a **list** as the `email` argument, not a plain
+string. That makes `recipients=[[new_user.email]]` (a list containing a
+list) instead of `recipients=["user@example.com"]`. See
+`05_issues_and_fixes.md` issue #15.
+
+## 12. How a single request flows end-to-end
 
 Example: `POST /task/create` with body `{"title": "Buy milk", "description": "2%"}`
 and header `Authorization: Bearer <token-from-login>`.

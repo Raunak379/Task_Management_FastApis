@@ -1,5 +1,5 @@
 #controller.py is used to organize the logic that handles API requests. It becomes useful when your FastAPI project gets bigger.
-from fastapi import HTTPException, status, Request
+from fastapi import HTTPException, status, Request, BackgroundTasks
 from src.user.dtos import userSchema, LoginSchema
 from sqlalchemy.orm import Session
 from src.user.models import user
@@ -8,6 +8,7 @@ from src.utils.settings import settings
 from datetime import datetime, timedelta
 import jwt
 from jwt.exceptions import InvalidTokenError
+from src.utils.mail import send_email
 
 password_hash = PasswordHash.recommended()
 def get_password_hash(password):
@@ -17,7 +18,7 @@ def verify_password(plain_password, hashed_password):
 
 
 ##### REGISTER USER----------
-def register(body:userSchema, db:Session):
+async def register(body:userSchema, db:Session, bg_task:BackgroundTasks):
     #print(body)
     ##1. usersname validation
     is_user = db.query(user).filter(user.username == body.username).first()
@@ -42,6 +43,11 @@ def register(body:userSchema, db:Session):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    ##send mail conformation
+    #res = await send_email(new_user.email)
+    bg_task.add_task(send_email, [new_user.email])
+   #print(res)
+
     return new_user
 
 

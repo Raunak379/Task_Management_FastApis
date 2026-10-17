@@ -7,7 +7,8 @@ behind them, and how everything connects and runs together.
 
 A REST API, built with **FastAPI**, for managing `Task` records in a **MySQL**
 database, with **JWT-based user authentication** (register/login) gating every
-task endpoint.
+task endpoint, and a **registration confirmation email** sent in the
+background via `fastapi-mail`.
 
 ## Tech stack
 
@@ -20,10 +21,15 @@ task endpoint.
 | Pydantic / pydantic-settings | data validation (request bodies) and settings/env loading |
 | PyJWT | encodes/decodes the JSON Web Tokens used for login sessions |
 | pwdlib (+ argon2-cffi) | hashes and verifies user passwords (Argon2 algorithm) |
+| fastapi-mail (+ aiosmtplib) | sends the "registration confirmation" email over SMTP |
 
-Note: `PyJWT`, `pwdlib`, and `argon2-cffi` are installed in `env/` and required
-to run the app, but are **not yet listed** in `requirement.txt` — see
-`05_issues_and_fixes.md`.
+Note: `PyJWT`, `pwdlib`, `argon2-cffi`, `fastapi-mail`, and `aiosmtplib` are
+installed in `env/` and required to run the app, but are **not yet listed**
+in `requirement.txt` — see `05_issues_and_fixes.md`.
+
+⚠️ **Security note:** `src/utils/mail.py` currently hardcodes a real Gmail
+address and app password directly in source. See issue #14 in
+`05_issues_and_fixes.md` — fix this before committing/pushing.
 
 ## Reading order
 

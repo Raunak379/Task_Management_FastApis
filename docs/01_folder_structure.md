@@ -26,7 +26,8 @@ Task_Management_FastApis/
         ├── db.py             # SQLAlchemy engine/session setup — the DB connection itself
         ├── settings.py       # loads .env into a typed Python object (DB + JWT config)
         ├── constant.py       # currently empty — meant for shared constants
-        └── helpers.py        # `is_authenticated` — JWT auth dependency shared across routers
+        ├── helpers.py        # `is_authenticated` — JWT auth dependency shared across routers
+        └── mail.py           # sends the registration confirmation email via fastapi-mail (see 05 — has hardcoded SMTP credentials)
 ```
 
 ## Why split code this way (feature-based structure)
@@ -49,8 +50,10 @@ adding a new folder with the same four files — nothing existing has to change.
 
 Anything that isn't specific to "task" or "user" but is needed by both lives
 in `utils/`: the database connection (`db.py`), configuration (`settings.py`),
-and the JWT auth dependency (`helpers.py`). Every endpoint in
-`src/task/router.py` depends on `is_authenticated` from `helpers.py` to require
-a logged-in user; `src/user/router.py`'s `/is_auth` endpoint also uses it
-(via `controller.is_authenticated`, a near-duplicate of the same function —
-see `05_issues_and_fixes.md`).
+the JWT auth dependency (`helpers.py`), and outbound email (`mail.py`). Every
+endpoint in `src/task/router.py` depends on `is_authenticated` from
+`helpers.py` to require a logged-in user; `src/user/router.py`'s `/is_auth`
+endpoint also uses it (via `controller.is_authenticated`, a near-duplicate of
+the same function — see `05_issues_and_fixes.md`). `src/user/controller.py`'s
+`register()` calls `mail.py::send_email` as a **background task** so the
+confirmation email doesn't delay the HTTP response — see `02_concepts.md` §11.

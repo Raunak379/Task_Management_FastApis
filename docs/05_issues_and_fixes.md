@@ -182,3 +182,94 @@ auto-strip any field you later add to the model but don't want exposed.
 **Fix:** add `response_model=TaskResponseSchema` (or a list/dict-wrapped
 variant) to the task routes, the same way `src/user/router.py` already does
 with `userResponseSchema`.
+
+## 14. 🚨 Hardcoded real SMTP credentials in `src/utils/mail.py`
+
+```python
+conf = ConnectionConfig(
+    MAIL_USERNAME = "sherraunaksingh@gmail.com",
+    MAIL_PASSWORD = "ftkl ewtt mpsw ncry",      ### that is App password not mail password
+    ...
+)
+```
+
+Every other secret in this project (`SECRET_KEY`, `DB_CONNECTION`) is kept in
+`.env` and loaded through `src/utils/settings.py`. This one is a real Gmail
+address and app password typed directly into a source file instead. Combined
+with issue #7 (`.gitignore` has no real rules), this credential is one
+`git add .` / `git add -A` away from being pushed to a remote repository.
+
+**Fix:**
+1. Add to `.env`:
+   ```
+   MAIL_USERNAME = "sherraunaksingh@gmail.com"
+   MAIL_PASSWORD = "<app password>"
+   MAIL_FROM = "sherraunaksingh@gmail.com"
+   ```
+2. Add matching fields to `src/utils/settings.py`'s `settings` class.
+3. In `src/utils/mail.py`, build `ConnectionConfig` from `settings.MAIL_*`
+   instead of literal strings.
+4. **Rotate/revoke this Gmail app password now** — it has already been
+   written into a file (and possibly viewed/shared) and should be treated as
+   compromised regardless of whether it ever reaches git.
+
+## 15. `send_email` is called with a list where it expects a single address
+
+`src/utils/mail.py::send_email(email: str)` does `recipients=[email]`
+internally — it expects a single address and wraps it itself. But
+`src/user/controller.py::register` calls:
+```python
+bg_task.add_task(send_email, [new_user.email])
+```
+passing a **one-item list**, not a string. That makes `recipients =
+[[new_user.email]]` — a list containing a list — instead of
+`recipients = ["new_user@example.com"]`. Since this runs as a background
+task (after the HTTP response is already sent), the failure won't show up
+in the API response at all, only in server logs/console.
+
+**Fix:**
+```python
+bg_task.add_task(send_email, new_user.email)
+```
+
+## 16. Dead/commented code left in `register()`
+
+```python
+##send mail conformation
+#res = await send_email(new_user.email)
+bg_task.add_task(send_email, [new_user.email])
+#print(res)
+```
+Leftover from an earlier version that `await`ed `send_email` directly
+(blocking the response) before switching to `BackgroundTasks`. Harmless but
+should be deleted now that the background-task version is the real
+implementation.
+
+## 17. `requirement.txt` still doesn't list `fastapi-mail` / `aiosmtplib`
+
+Building on issue #8: `src/utils/mail.py` imports `fastapi_mail`, which
+pulls in `aiosmtplib` under the hood (both are installed in `env/`, neither
+is in `requirement.txt`). A clean install would now fail at
+`ModuleNotFoundError: No module named 'fastapi_mail'` the moment
+`/user/register` is hit, on top of the already-missing `PyJWT`/`pwdlib`.
+
+**Fix:** add `fastapi-mail` to `requirement.txt` alongside the fixes in
+issue #8.
+
+## 18. `userSchema.email` is typed `str`, not `EmailStr`
+
+`src/user/dtos.py` — `email: str` accepts any string at all, including
+obviously-invalid addresses like `"not-an-email"`. Now that this value is
+actually used to send mail (`src/utils/mail.py`), a malformed address will
+only fail much later, inside the background email task, instead of at
+request validation time.
+
+**Fix:**
+```python
+from pydantic import BaseModel, EmailStr
+
+class userSchema(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
+```

@@ -35,14 +35,15 @@ pip install -r requirement.txt
 ```
 
 ⚠️ **`requirement.txt` is currently incomplete.** The code imports `jwt`
-(PyJWT) and `pwdlib` for authentication, but neither is listed in the file.
+(PyJWT) and `pwdlib` for authentication, and `fastapi_mail` for the
+registration confirmation email, but none of these are listed in the file.
 Until that's fixed (see `05_issues_and_fixes.md`), also run:
 
 ```bash
-pip install PyJWT "pwdlib[argon2]"
+pip install PyJWT "pwdlib[argon2]" fastapi-mail
 ```
 
-(Both are already present in this repo's `env/` folder if you're reusing it
+(All are already present in this repo's `env/` folder if you're reusing it
 instead of creating a fresh one.)
 
 ## 4. Configure `.env`
@@ -65,6 +66,12 @@ EXP_TIME = 30
 `src/utils/settings.py` reads all four automatically on startup — no code
 changes needed. If any is missing, startup fails fast with a clear
 validation error instead of a confusing runtime crash later.
+
+⚠️ **Email credentials are not in `.env` at all.** `src/utils/mail.py`
+hardcodes a real Gmail address + app password directly in source instead of
+reading them from settings. See issue #14 in `05_issues_and_fixes.md` — until
+that's fixed, every successful registration below will attempt to send a
+**real email** through that hardcoded account.
 
 ## 5. Run the server
 
@@ -105,6 +112,9 @@ curl -X POST http://127.0.0.1:8000/user/register \
   -d '{"username": "angad", "email": "angad14723@gmail.com", "password": "a-real-password"}'
 ```
 Returns `{"username": ..., "email": ..., "id": ...}` — no password/hash in the response.
+This also queues a confirmation email in the background (§4 above) — the
+response doesn't wait on it, but it will attempt to send over SMTP right
+after.
 
 **2. Log in to get a token:**
 ```bash

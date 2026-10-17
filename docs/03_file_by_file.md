@@ -127,6 +127,50 @@ def is_authenticated(request:Request, db:Session = Depends(get_db)):
 
 ---
 
+## `src/utils/mail.py` — registration confirmation email
+
+```python
+conf = ConnectionConfig(
+    MAIL_USERNAME = "sherraunaksingh@gmail.com",
+    MAIL_PASSWORD = "ftkl ewtt mpsw ncry",
+    MAIL_FROM = "sherraunaksingh@gmail.com",
+    MAIL_PORT = 587,
+    MAIL_SERVER = "smtp.gmail.com",
+    MAIL_FROM_NAME="Raunak FastApi",
+    MAIL_STARTTLS = True,
+    MAIL_SSL_TLS = False,
+    USE_CREDENTIALS = True,
+    VALIDATE_CERTS = True
+)
+
+async def send_email(email: str):
+    html = """<p>Hi, Thanks for registraction. our team will connect you soon !</p> """
+    message = MessageSchema(subject="Registration confirmation", recipients=[email],
+                             body=html, subtype=MessageType.html)
+    fm = FastMail(conf)
+    await fm.send_message(message)
+```
+
+- `ConnectionConfig` (from `fastapi_mail`) describes how to reach the SMTP
+  server (Gmail here, port `587` + STARTTLS) and which credentials to log in
+  with.
+- `send_email(email)` builds an HTML email via `MessageSchema` and sends it
+  through `FastMail(conf).send_message(...)`.
+- Called from `src/user/controller.py::register` as a **background task**
+  (§11 in `02_concepts.md`) right after a new user is committed to the DB —
+  so every successful `POST /user/register` triggers a real outbound email.
+
+🚨 **Critical issue:** the Gmail address and **app password** above are
+hardcoded directly in this file, not read from `.env`/`settings.py` like
+every other secret in the project (`SECRET_KEY`, `DB_CONNECTION`). Combined
+with `.gitignore` having no real rules (issue #7), this real credential is
+one `git add .` away from being pushed to a remote. See
+`05_issues_and_fixes.md` issue #14 — move these into `.env` and
+`settings.py` immediately, and rotate/revoke this app password since it has
+already been exposed in this conversation/file.
+
+---
+
 ## `src/task/models.py` — the `task` SQL table
 
 ```python
@@ -262,12 +306,18 @@ def verify_password(plain_password, hashed_password):
 `pwdlib`'s `PasswordHash.recommended()` picks a modern default algorithm
 (Argon2, backed by the `argon2-cffi` package) for hashing/verifying passwords.
 
-- **`register(body, db)`** — checks `username` not taken (400 if so), checks
-  `email` not taken (400 if so), hashes `body.password` via
-  `get_password_hash`, builds a `user(...)` row with the hash stored in
-  `hashed_password`, `add()`+`commit()`+`refresh()`s it, returns the row
-  (serialized through `userResponseSchema` by the router — hash never leaves
-  the server).
+- **`register(body, db, bg_task)`** (now `async def`) — checks `username` not
+  taken (400 if so), checks `email` not taken (400 if so), hashes
+  `body.password` via `get_password_hash`, builds a `user(...)` row with the
+  hash stored in `hashed_password`, `add()`+`commit()`+`refresh()`s it, then
+  queues `send_email` (`src/utils/mail.py`) as a background task via
+  `bg_task.add_task(send_email, [new_user.email])` so a confirmation email
+  goes out *after* the response is returned (see `02_concepts.md` §11 for the
+  `BackgroundTasks` mechanism, and the list-vs-string argument bug noted
+  there). Returns the new row (serialized through `userResponseSchema` by the
+  router — hash never leaves the server). Has two leftover commented-out
+  lines (`#res = await send_email(...)`, `#print(res)`) from an earlier
+  non-background version.
 - **`login_user(body, db)`** — looks the user up by `username` (401 "wrong
   password" if not found — deliberately the same message as a wrong password,
   so the API doesn't reveal whether a username exists), verifies
@@ -288,7 +338,7 @@ def verify_password(plain_password, hashed_password):
 
 | Method | Path | Calls | Auth required |
 |---|---|---|---|
-| POST | `/user/register` | `controller.register` | no |
+| POST | `/user/register` | `controller.register` (sends confirmation email in background) | no |
 | POST | `/user/login` | `controller.login_user` | no |
 | GET | `/user/is_auth` | `controller.is_authenticated` | yes (JWT) |
 
@@ -296,6 +346,10 @@ def verify_password(plain_password, hashed_password):
 `response_model` are what strip `hashed_password` out of the JSON response —
 FastAPI builds the response by reading only the fields `userResponseSchema`
 declares, off of whatever object the controller returns.
+
+`register` here is `async def register(body, bg_task: BackgroundTasks, db =
+Depends(get_db))` and `await`s `controller.register(...)`, matching the
+controller now being `async` (see above and `02_concepts.md` §11).
 
 There is no `update`/`delete`/`get-all`/`get-by-id` endpoint for users yet —
 only register, login, and the auth check.
@@ -342,9 +396,10 @@ pymysql
 pydantic-settings
 ```
 
-No version pins, and — now that JWT auth and password hashing exist —
-**missing `PyJWT` and `pwdlib` entirely**, even though both are imported by
-the code and installed in `env/`. See `05_issues_and_fixes.md`.
+No version pins, and — now that JWT auth, password hashing, and email
+sending exist — **missing `PyJWT`, `pwdlib`, `fastapi-mail`, and
+`aiosmtplib` entirely**, even though all four are imported by the code and
+installed in `env/`. See `05_issues_and_fixes.md`.
 
 ## `env/` and `__pycache__/`
 
